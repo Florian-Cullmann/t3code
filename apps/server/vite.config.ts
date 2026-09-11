@@ -23,6 +23,12 @@ export { shouldBundleCliDependency };
 const repoEnv = loadRepoEnv();
 const cliBuildChannel = packageJson.version.includes("-nightly.") ? "nightly" : "latest";
 
+// `build:exe` wraps the same bundle in a Node single-executable. tsdown's exe
+// step refuses multi-chunk output and counts the sourcemap as a chunk, and the
+// executable needs a host Node that supports `--build-sea` (25.7+), so this is
+// a separate mode rather than a second entry in the default build.
+const packExecutable = process.env.T3CODE_PACK_EXE === "1";
+
 export default mergeConfig(
   baseConfig,
   defineConfig({
@@ -37,9 +43,20 @@ export default mergeConfig(
     },
     pack: {
       entry: ["src/bin.ts"],
-      outDir: "dist",
-      sourcemap: true,
+      outDir: packExecutable ? "dist-exe" : "dist",
+      sourcemap: !packExecutable,
       clean: true,
+      ...(packExecutable
+        ? {
+            exe: {
+              fileName: "t3",
+              outDir: "dist-exe",
+              // The code cache only loads on the platform that produced it, so
+              // executables are always built natively, never cross-compiled.
+              seaConfig: { useCodeCache: true },
+            },
+          }
+        : {}),
       deps: {
         // Both halves are required. `alwaysBundle` forces the JS dependencies in
         // (declared deps are external by default, which is what this change is
