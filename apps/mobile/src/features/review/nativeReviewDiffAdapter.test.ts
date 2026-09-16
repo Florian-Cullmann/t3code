@@ -10,6 +10,7 @@ import { readDefaultMobileThemeVariables } from "../../lib/mobileTheme.test-supp
 
 import {
   buildNativeReviewDiffData,
+  buildNativeReviewSnippetRows,
   createNativeReviewDiffTheme,
   getCachedNativeReviewDiffData,
   type BuildNativeReviewDiffDataInput,
@@ -29,6 +30,31 @@ const parsedDiff = buildReviewParsedDiff(
   ].join("\n"),
   "native-review-cache-test",
 );
+
+describe("buildNativeReviewSnippetRows", () => {
+  it("preserves selected code and change types without inventing line numbers", () => {
+    const rows = buildNativeReviewSnippetRows({
+      id: "selection",
+      diff: "  unchanged\r\n-  before\r\n+  after\r\n",
+    });
+    expect(
+      rows.map((row) => [row.content, row.change, row.oldLineNumber, row.newLineNumber]),
+    ).toEqual([
+      [" unchanged", "context", null, null],
+      ["  before", "delete", null, null],
+      ["  after", "add", null, null],
+    ]);
+  });
+
+  it("leaves full patches, unrecognized text, and non-diff code to their existing renderers", () => {
+    for (const diff of ["@@ -1 +1 @@\n-old\n+new", "--- a/file\n+++ b/file", "plain text", ""]) {
+      expect(buildNativeReviewSnippetRows({ id: "selection", diff })).toEqual([]);
+    }
+    expect(
+      buildNativeReviewSnippetRows({ id: "code", diff: "+value", fenceLanguage: "typescript" }),
+    ).toEqual([]);
+  });
+});
 
 function makeComment(text: string): ReviewInlineComment {
   return {
@@ -72,6 +98,29 @@ function appTheme(themeId: MobileThemeId, appearance: MobileThemeAppearance) {
 }
 
 describe("getCachedNativeReviewDiffData", () => {
+  it.each([true, false])(
+    "preserves available diff rows before a notice (has excerpt: %s)",
+    (hasExcerpt) => {
+      if (parsedDiff.kind !== "files") throw new Error("Expected a parsed file diff");
+      const notice = "This file preview was truncated.";
+      const result = buildNativeReviewDiffData({
+        parsedDiff: {
+          ...parsedDiff,
+          files: parsedDiff.files.map((file) => ({
+            ...file,
+            rows: hasExcerpt ? file.rows : [],
+            notice,
+          })),
+        },
+      });
+      const original = buildNativeReviewDiffData({ parsedDiff });
+      expect(result.rows.slice(0, -1)).toEqual(
+        hasExcerpt ? original.rows : original.rows.filter((row) => row.kind === "file"),
+      );
+      expect(result.rows.at(-1)).toMatchObject({ kind: "notice", text: notice });
+    },
+  );
+
   it("reuses the row model for equivalent empty comment arrays", () => {
     const first = getCachedNativeReviewDiffData(buildInput([]));
     const second = getCachedNativeReviewDiffData(buildInput([]));
